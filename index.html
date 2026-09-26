@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#151922">
+<title>BedrockAI V3 — Criador de Add-Ons</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Arial;background:#0d1117;color:#eef2f7}
+header{padding:22px 18px;border-bottom:1px solid #263041;background:#111722}
+.wrap{max-width:900px;margin:auto;padding:18px}.brand{font-size:24px;font-weight:800}.sub{color:#9fb0c6;margin-top:5px}
+.card{background:#151c27;border:1px solid #293548;border-radius:18px;padding:18px;margin:16px 0}
+label{font-weight:700;display:block;margin-bottom:8px}textarea,input,select{width:100%;background:#0d131c;color:#fff;border:1px solid #33435a;border-radius:12px;padding:13px;font-size:16px}
+textarea{min-height:130px;resize:vertical}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+button{border:0;border-radius:12px;padding:13px 16px;font-weight:800;font-size:15px;cursor:pointer;background:#43d17d;color:#07130b}
+button.secondary{background:#263246;color:#eaf1fb}.pill{display:inline-block;background:#223047;border-radius:999px;padding:6px 10px;margin:3px;font-size:13px}
+pre{white-space:pre-wrap;word-break:break-word;background:#0a0f16;padding:14px;border-radius:12px;max-height:330px;overflow:auto;color:#cfe3ff}
+.ok{color:#66e394}.warn{color:#ffce67}.small{font-size:13px;color:#9fb0c6}
+@media(max-width:650px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><div class="wrap"><div class="brand">⛏️ BedrockAI V3</div><div class="sub">Crie Add-Ons de Minecraft Bedrock com uma descrição simples.</div></div></header>
+<main class="wrap">
+<div class="card">
+<label>O que você quer criar?</label>
+<textarea id="prompt" placeholder="Ex.: Crie uma espada de rubi chamada Espada Rubi, com 12 de dano e 850 de durabilidade. Crie também um bloco de rubi."></textarea>
+<div class="grid" style="margin-top:12px">
+<div><label>Nome do Add-On</label><input id="packName" value="Meu Add-On IA"></div>
+<div><label>Namespace</label><input id="namespace" value="bedrockai"></div>
+</div>
+<div class="btns"><button onclick="generate()">✨ GERAR MOD</button><button class="secondary" onclick="example()">Usar exemplo</button></div>
+<p class="small">Funciona sem conta e sem API paga. O interpretador roda no seu aparelho.</p>
+</div>
+
+<div class="card" id="result" style="display:none">
+<h2>Projeto gerado</h2><div id="chips"></div>
+<p id="status" class="ok"></p>
+<div class="btns"><button onclick="openInMinecraft()">🎮 ABRIR NO MINECRAFT</button><button class="secondary" onclick="editMod()">✏️ Editar mod</button><button class="secondary" onclick="downloadAddon()">📦 Salvar .mcaddon</button><button class="secondary" onclick="showFiles()">Ver arquivos</button></div>
+<pre id="preview" style="display:none"></pre>
+</div>
+
+<div class="card">
+<b>O que esta versão cria</b>
+<p><span class="pill">Itens</span><span class="pill">Espadas</span><span class="pill">Picaretas</span><span class="pill">Blocos</span><span class="pill">Receitas</span><span class="pill">Texturas simples</span><span class="pill">.mcaddon</span></p>
+<p class="small">V3: gere o mod e use “ABRIR NO MINECRAFT”. Em Android compatível, o sistema abre a tela para enviar o .mcaddon diretamente a um aplicativo instalado. Se o navegador bloquear isso, o arquivo é salvo automaticamente como alternativa.</p>
+</div>
+</main>
+<script>
+let project=null;
+const enc=new TextEncoder();
+function slug(s){return (s||"item").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"").slice(0,40)||"item"}
+function uuid(){return crypto.randomUUID()}
+function example(){document.getElementById("prompt").value="Crie uma espada de rubi chamada Espada Rubi com 12 de dano e 850 de durabilidade. Crie também um bloco de rubi e uma receita para a espada."}
+function detectNumber(text,words,def){for(const w of words){let r=new RegExp("(\\d+)\\s*(?:de\\s*)?"+w+"|"+w+"\\s*(?:de\\s*)?(\\d+)","i"),m=text.match(r);if(m)return +(m[1]||m[2])}return def}
+function parsePrompt(t){
+ const low=t.toLowerCase(), out=[];
+ const damage=detectNumber(low,["dano","damage"],8), dura=detectNumber(low,["durabilidade","durability"],500);
+ let nameMatch=t.match(/chamad[ao]\s+([A-Za-zÀ-ÿ0-9 ]+?)(?=\s+com|\s+e\s+|[,.]|$)/i);
+ if(/espada|sword/.test(low)) out.push({type:"sword",name:nameMatch?nameMatch[1].trim():"Espada Personalizada",damage,durability:dura});
+ if(/picareta|pickaxe/.test(low)) out.push({type:"pickaxe",name:nameMatch?nameMatch[1].trim():"Picareta Personalizada",damage:Math.max(2,damage-3),durability:dura});
+ if(/bloco|block/.test(low)){let mat=(low.match(/bloco\s+de\s+([a-zà-ÿ0-9]+)/i)||[])[1]||"especial";out.push({type:"block",name:"Bloco de "+mat.charAt(0).toUpperCase()+mat.slice(1)})}
+ if(!out.length){let nm=nameMatch?nameMatch[1].trim():"Item da IA";out.push({type:"item",name:nm})}
+ return out;
+}
+function manifest(name,type,id1,id2,dep){
+ let o={format_version:2,header:{name,description:"Gerado pelo BedrockAI",uuid:id1,version:[1,0,0],min_engine_version:[1,21,0]},modules:[{type,uuid:id2,version:[1,0,0]}]};
+ if(dep)o.dependencies=[{uuid:dep,version:[1,0,0]}]; return o;
+}
+function itemJSON(ns,o,id){
+ let c={"minecraft:display_name":{value:o.name},"minecraft:icon":{texture:id},"minecraft:max_stack_size":1};
+ if(o.type==="sword"||o.type==="pickaxe"){
+   c["minecraft:damage"]=o.damage;
+   c["minecraft:durability"]={max_durability:o.durability};
+   c["minecraft:hand_equipped"]=true;
+ }
+ return {format_version:"1.21.0","minecraft:item":{description:{identifier:ns+":"+id,menu_category:{category:"equipment"}},components:c}};
+}
+function blockJSON(ns,o,id){
+ return {format_version:"1.21.0","minecraft:block":{description:{identifier:ns+":"+id,menu_category:{category:"construction"}},components:{
+ "minecraft:display_name":o.name,"minecraft:destructible_by_mining":{seconds_to_destroy:2},"minecraft:material_instances":{"*":{texture:id,"render_method":"opaque"}}, "minecraft:geometry":"minecraft:geometry.full_block"}}};
+}
+function recipeJSON(ns,o,id){
+ return {format_version:"1.21.0","minecraft:recipe_shaped":{description:{identifier:ns+":"+id+"_recipe"},tags:["crafting_table"],pattern:[" X "," X "," S "],key:{X:{item:"minecraft:diamond"},S:{item:"minecraft:stick"}},result:{item:ns+":"+id,amount:1}}};
+}
+function colorFrom(s){let h=0;for(const c of s)h=(h*31+c.charCodeAt(0))>>>0;return [(h>>16)&255,(h>>8)&255,h&255]}
+async function png16(name){
+ let c=document.createElement("canvas");c.width=c.height=16;let x=c.getContext("2d"),rgb=colorFrom(name);
+ x.fillStyle=`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;x.fillRect(1,1,14,14);x.fillStyle="rgba(255,255,255,.28)";
+ for(let i=2;i<14;i+=4)x.fillRect(i,2,2,12);x.strokeStyle="rgba(0,0,0,.5)";x.strokeRect(.5,.5,15,15);
+ return new Uint8Array(await (await new Promise(r=>c.toBlob(r,"image/png"))).arrayBuffer());
+}
+async function generate(){
+ const text=document.getElementById("prompt").value.trim(); if(!text){alert("Descreva o Add-On primeiro.");return}
+ const ns=slug(document.getElementById("namespace").value), pack=document.getElementById("packName").value.trim()||"Meu Add-On";
+ const objs=parsePrompt(text), bpH=uuid(),bpM=uuid(),rpH=uuid(),rpM=uuid(),files={};
+ files["behavior_pack/manifest.json"]=JSON.stringify(manifest(pack+" BP","data",bpH,bpM,rpH),null,2);
+ files["resource_pack/manifest.json"]=JSON.stringify(manifest(pack+" RP","resources",rpH,rpM),null,2);
+ let itemTextures={}, terrain={resource_pack_name:pack,texture_name:"atlas.terrain",texture_data:{}};
+ for(const o of objs){let id=slug(o.name);
+   if(o.type==="block"){files[`behavior_pack/blocks/${id}.json`]=JSON.stringify(blockJSON(ns,o,id),null,2);terrain.texture_data[id]={textures:`textures/blocks/${id}`};files[`resource_pack/textures/blocks/${id}.png`]=await png16(o.name)}
+   else {files[`behavior_pack/items/${id}.json`]=JSON.stringify(itemJSON(ns,o,id),null,2);itemTextures[id]={textures:`textures/items/${id}`};files[`resource_pack/textures/items/${id}.png`]=await png16(o.name);if(o.type==="sword"||o.type==="pickaxe")files[`behavior_pack/recipes/${id}.json`]=JSON.stringify(recipeJSON(ns,o,id),null,2)}
+ }
+ files["resource_pack/textures/item_texture.json"]=JSON.stringify({resource_pack_name:pack,texture_name:"atlas.items",texture_data:itemTextures},null,2);
+ files["resource_pack/textures/terrain_texture.json"]=JSON.stringify(terrain,null,2);
+ project={name:pack,ns,objs,files};
+ document.getElementById("result").style.display="block";
+ document.getElementById("chips").innerHTML=objs.map(o=>`<span class="pill">${o.type}: ${o.name}</span>`).join("");
+ document.getElementById("status").textContent=`✓ ${objs.length} elemento(s) gerado(s). Pronto para exportar.`;
+ document.getElementById("preview").style.display="none";
+}
+function showFiles(){if(!project)return;let p=document.getElementById("preview");p.style.display="block";p.textContent=Object.entries(project.files).map(([k,v])=>"📄 "+k+"\n"+(typeof v==="string"?v:"[PNG gerado]")).join("\n\n")}
+function crc32(data){let c=0xffffffff;for(let b of data){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0)}return (c^0xffffffff)>>>0}
+function u16(n){return [n&255,(n>>>8)&255]} function u32(n){return [n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255]}
+function zipStore(files){
+ let locals=[],centrals=[],offset=0,count=0;
+ for(const [name,val] of Object.entries(files)){let n=enc.encode(name),d=typeof val==="string"?enc.encode(val):val,crc=crc32(d);
+  let lh=new Uint8Array([...u32(0x04034b50),...u16(20),0,0,0,0,0,0,0,0,...u32(crc),...u32(d.length),...u32(d.length),...u16(n.length),0,0,...n,...d]);
+  locals.push(lh);
+  let ch=new Uint8Array([...u32(0x02014b50),...u16(20),...u16(20),0,0,0,0,0,0,0,0,...u32(crc),...u32(d.length),...u32(d.length),...u16(n.length),0,0,0,0,0,0,0,0,0,0,0,0,...u32(offset),...n]);
+  centrals.push(ch);offset+=lh.length;count++;
+ }
+ let cs=centrals.reduce((a,b)=>a+b.length,0), end=new Uint8Array([...u32(0x06054b50),0,0,0,0,...u16(count),...u16(count),...u32(cs),...u32(offset),0,0]);
+ return new Blob([...locals,...centrals,end],{type:"application/zip"});
+}
+async function buildAddonBlob(){
+ if(!project) throw new Error("Gere um mod primeiro.");
+ const bp={}, rp={};
+ for(const [path,val] of Object.entries(project.files)){
+   if(path.startsWith("behavior_pack/")) bp[path.substring("behavior_pack/".length)]=val;
+   if(path.startsWith("resource_pack/")) rp[path.substring("resource_pack/".length)]=val;
+ }
+ const bpBytes=new Uint8Array(await zipStore(bp).arrayBuffer());
+ const rpBytes=new Uint8Array(await zipStore(rp).arrayBuffer());
+ return zipStore({
+   [slug(project.name)+"_BP.mcpack"]:bpBytes,
+   [slug(project.name)+"_RP.mcpack"]:rpBytes
+ });
+}
+async function downloadAddon(){
+ if(!project){alert("Gere um mod primeiro.");return}
+ const addonBlob=await buildAddonBlob();
+ const a=document.createElement("a");
+ a.href=URL.createObjectURL(addonBlob);
+ a.download=slug(project.name)+".mcaddon";
+ document.body.appendChild(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+}
+async function openInMinecraft(){
+ if(!project){alert("Gere um mod primeiro.");return}
+ const blob=await buildAddonBlob();
+ const filename=slug(project.name)+".mcaddon";
+ const file=new File([blob],filename,{type:"application/octet-stream"});
+ // Android browsers that support Web Share can hand the .mcaddon to an installed app.
+ try{
+   if(navigator.canShare && navigator.canShare({files:[file]})){
+     await navigator.share({files:[file],title:"Abrir Add-On no Minecraft"});
+     return;
+   }
+ }catch(e){
+   if(e && e.name==="AbortError") return;
+ }
+ // Safe fallback: download the correctly named file. Android decides which app can open it.
+ const a=document.createElement("a");
+ a.href=URL.createObjectURL(blob);a.download=filename;
+ document.body.appendChild(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+ alert("O Android não permitiu abrir o Minecraft diretamente pelo navegador. O .mcaddon foi salvo pronto. Toque nele e escolha Minecraft, se aparecer.");
+}
+function editMod(){
+ document.getElementById("prompt").focus();
+ document.getElementById("prompt").scrollIntoView({behavior:"smooth",block:"center"});
+}
+</script>
+</body></html>
